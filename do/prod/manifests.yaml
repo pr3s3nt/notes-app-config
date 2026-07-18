@@ -1,0 +1,271 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app.kubernetes.io/component: datastore
+  name: backend-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-db
+  serviceName: backend-db
+  template:
+    metadata:
+      labels:
+        app: backend-db
+    spec:
+      containers:
+        - env:
+            - name: POSTGRES_DB
+              value: appdb
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: backend-db-credentials
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          image: postgres:16-alpine
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - appdb
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          name: postgres
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - appdb
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: data
+      imagePullSecrets:
+        - name: registry-idp-notes-thanhnt
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        storageClassName: do-block-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: backend-db
+  name: backend-db
+spec:
+  clusterIP: None
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: backend-db
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-route-notes-app-prod-104-248-96-140-nip-io-api
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: notes-app-prod.104.248.96.140.nip.io
+      http:
+        paths:
+          - backend:
+              service:
+                name: backend
+                port:
+                  number: 8080
+            path: /api
+            pathType: Prefix
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend-route-notes-app-prod-104-248-96-140-nip-io
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: notes-app-prod.104.248.96.140.nip.io
+      http:
+        paths:
+          - backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    k8s.score.dev/workload-name: backend
+  labels:
+    app.kubernetes.io/instance: backend-a35ad62313
+    app.kubernetes.io/managed-by: score-k8s
+    app.kubernetes.io/name: backend
+  name: backend
+spec:
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/instance: backend-a35ad62313
+status:
+  loadBalancer: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    k8s.score.dev/workload-name: backend
+  labels:
+    app.kubernetes.io/instance: backend-a35ad62313
+    app.kubernetes.io/managed-by: score-k8s
+    app.kubernetes.io/name: backend
+    env: prod
+  name: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: backend-a35ad62313
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        k8s.score.dev/workload-name: backend
+      labels:
+        app.kubernetes.io/instance: backend-a35ad62313
+        app.kubernetes.io/managed-by: score-k8s
+        app.kubernetes.io/name: backend
+    spec:
+      containers:
+        - env:
+            - name: DB_HOST
+              value: backend-db
+            - name: DB_NAME
+              value: appdb
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: backend-db-credentials
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: postgres
+            - name: PORT
+              value: "8080"
+          image: registry.digitalocean.com/idp-notes-thanhnt/notes-app:backend-833bc871082ec9653f00f345a9ffdacef08499be
+          name: main
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      imagePullSecrets:
+        - name: registry-idp-notes-thanhnt
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    k8s.score.dev/workload-name: frontend
+  labels:
+    app.kubernetes.io/instance: frontend-3fe17db312
+    app.kubernetes.io/managed-by: score-k8s
+    app.kubernetes.io/name: frontend
+  name: frontend
+spec:
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app.kubernetes.io/instance: frontend-3fe17db312
+status:
+  loadBalancer: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    k8s.score.dev/workload-name: frontend
+  labels:
+    app.kubernetes.io/instance: frontend-3fe17db312
+    app.kubernetes.io/managed-by: score-k8s
+    app.kubernetes.io/name: frontend
+    env: prod
+  name: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: frontend-3fe17db312
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        k8s.score.dev/workload-name: frontend
+      labels:
+        app.kubernetes.io/instance: frontend-3fe17db312
+        app.kubernetes.io/managed-by: score-k8s
+        app.kubernetes.io/name: frontend
+    spec:
+      containers:
+        - image: registry.digitalocean.com/idp-notes-thanhnt/notes-app:frontend-833bc871082ec9653f00f345a9ffdacef08499be
+          name: main
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      imagePullSecrets:
+        - name: registry-idp-notes-thanhnt
+status: {}
